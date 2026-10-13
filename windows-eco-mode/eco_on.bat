@@ -15,6 +15,8 @@ chcp 65001 >nul
 ::   - "Экономия заряда" Windows (Energy Saver) - включена всегда
 ::   - останавливает и отключает некритичные фоновые службы (список ниже)
 ::   - запрещает фоновую работу приложений из Microsoft Store
+::   - Защитник Windows: плановые проверки выкл., лимит CPU для проверок,
+::     защита в реальном времени выкл. (только если выключена Защита от подделки)
 ::
 ::  Что НЕ трогает: таймеры сна, гибернации и отключения экрана, действия
 ::  крышки и кнопок, Wi-Fi, Bluetooth, сеть, Защитник Windows, звук,
@@ -42,6 +44,11 @@ rem   Wi-Fi адаптер: 0 макс. производительность, 1 
 rem   (3 даёт больше экономии, но на некоторых адаптерах рвёт связь)
 set "DISK_OFF=60"
 rem   отключать жесткий диск через N секунд простоя
+set "DEFENDER_OFF=1"
+rem   1 = отключать защиту Защитника в реальном времени (штатной командой Set-MpPreference).
+rem   Работает только если в Безопасности Windows выключена "Защита от подделки":
+rem   Windows специально не даёт сделать это скриптом. 0 = защиту не трогать,
+rem   тогда остаётся только безопасная экономия: плановые проверки выкл., лимит CPU.
 set "SERVICES=WSearch SysMain DiagTrack DoSvc wuauserv MapsBroker WMPNetworkSvc XblAuthManager XblGameSave XboxNetApiSvc XboxGipSvc"
 rem   службы, которые будут остановлены и отключены до запуска eco_off.bat.
 rem   Все некритичные: индексация поиска, SysMain, телеметрия, оптимизация
@@ -82,7 +89,7 @@ if exist "%STATE%" (
 )
 
 :: ---------------------- 1. Сохранение текущего состояния ----------------------
-echo [1/6] Сохраняю текущее состояние в %STATE%
+echo [1/7] Сохраняю текущее состояние в %STATE%
 set "ORIG_SCHEME="
 for /f "tokens=3" %%g in ('reg query "%REG_PS%" /v ActivePowerScheme 2^>nul ^| findstr /i "ActivePowerScheme"') do set "ORIG_SCHEME=%%g"
 if not defined ORIG_SCHEME set "ORIG_SCHEME=%BALANCED%"
@@ -106,18 +113,20 @@ set "BG=NONE"
 for /f "tokens=3" %%v in ('reg query "%REG_BG%" /v LetAppsRunInBackground 2^>nul ^| findstr /i "REG_DWORD"') do set "BG=%%v"
 >>"%STATE%" echo BGAPPS=%BG%
 
+powershell -NoProfile -Command "$p = Get-MpPreference -ErrorAction SilentlyContinue; if ($p) { Add-Content -LiteralPath '%STATE%' -Value ('DEF_RT=' + [int]$p.DisableRealtimeMonitoring), ('DEF_CPU=' + [int]$p.ScanAvgCPULoadFactor), ('DEF_IDLE=' + [int]$p.ScanOnlyIfIdleEnabled), ('DEF_CQ=' + [int]$p.DisableCatchupQuickScan), ('DEF_CF=' + [int]$p.DisableCatchupFullScan), ('DEF_DAY=' + [int]$p.ScanScheduleDay) }"
+
 :apply
 if not defined ORIG_SCHEME set "ORIG_SCHEME=%BALANCED%"
 
 :: ---------------------- 2. Схема электропитания "Eco" ----------------------
-echo [2/6] Создаю схему электропитания "Eco" на основе текущей
+echo [2/7] Создаю схему электропитания "Eco" на основе текущей
 powercfg /setactive %ORIG_SCHEME% >nul 2>&1 || powercfg /setactive %BALANCED% >nul 2>&1
 powercfg /delete %ECO_GUID% >nul 2>&1
 powercfg /duplicatescheme %ORIG_SCHEME% %ECO_GUID% >nul 2>&1 || powercfg /duplicatescheme %BALANCED% %ECO_GUID% >nul 2>&1
 powercfg /changename %ECO_GUID% "Eco" "Economy mode created by eco_on.bat" >nul 2>&1
 
 :: ---------------------- 3. Настройки экономии ----------------------
-echo [3/6] Применяю настройки экономии: процессор, диски, PCIe, USB, Wi-Fi, экран, медиа
+echo [3/7] Применяю настройки экономии: процессор, диски, PCIe, USB, Wi-Fi, экран, медиа
 set "AC=call :setac"
 set "DC=call :setdc"
 set "BOTH=call :setboth"
@@ -178,11 +187,11 @@ rem --- Экономия заряда Windows: порог 100 (всегда от
 powercfg /setactive %ECO_GUID% >nul 2>&1 || echo       [x] Не удалось активировать схему Eco. Проверьте: powercfg /list
 
 :: ---------------------- 4. Яркость ----------------------
-echo [4/6] Яркость экрана: %BRIGHTNESS%%%
+echo [4/7] Яркость экрана: %BRIGHTNESS%%%
 powershell -NoProfile -Command "Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightnessMethods -ErrorAction SilentlyContinue | ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName WmiSetBrightness -Arguments @{Timeout=[uint32]1; Brightness=[byte]%BRIGHTNESS%} | Out-Null }"
 
 :: ---------------------- 5. Фоновые службы ----------------------
-echo [5/6] Останавливаю и отключаю некритичные фоновые службы
+echo [5/7] Останавливаю и отключаю некритичные фоновые службы
 for %%s in (%SERVICES%) do (
     reg query "HKLM\SYSTEM\CurrentControlSet\Services\%%s" /v Start >nul 2>&1 && (
         sc config %%s start= disabled >nul 2>&1
@@ -192,8 +201,15 @@ for %%s in (%SERVICES%) do (
 )
 
 :: ---------------------- 6. Фоновые приложения ----------------------
-echo [6/6] Запрещаю фоновую работу приложений Microsoft Store
+echo [6/7] Запрещаю фоновую работу приложений Microsoft Store
 reg add "%REG_BG%" /v LetAppsRunInBackground /t REG_DWORD /d 2 /f >nul 2>&1
+
+:: ---------------------- 7. Защитник Windows ----------------------
+echo [7/7] Защитник Windows: плановые проверки выкл., лимит CPU для проверок 5 проц.
+powershell -NoProfile -Command "Set-MpPreference -ScanAvgCPULoadFactor 5 -ErrorAction SilentlyContinue; Set-MpPreference -ScanOnlyIfIdleEnabled $true -ErrorAction SilentlyContinue; Set-MpPreference -DisableCatchupQuickScan $true -ErrorAction SilentlyContinue; Set-MpPreference -DisableCatchupFullScan $true -ErrorAction SilentlyContinue; Set-MpPreference -ScanScheduleDay 8 -ErrorAction SilentlyContinue"
+if not "%DEFENDER_OFF%"=="1" goto :defender_done
+powershell -NoProfile -Command "$s = Get-MpComputerStatus -ErrorAction SilentlyContinue; if (-not $s) { Write-Host '      Защитник Windows не найден - пропускаю'; exit }; if ($s.AMRunningMode -ne 'Normal') { Write-Host ('      Защитник в режиме ' + $s.AMRunningMode + ': защитой управляет другой антивирус, отключайте его в его собственных настройках'); exit }; if ($s.IsTamperProtected) { Write-Host '      [x] Включена Защита от подделки: Windows не даёт отключить защиту в реальном времени скриптом.'; Write-Host '          Вручную: Безопасность Windows - Защита от вирусов и угроз - Управление настройками - Защита от подделки: Выкл. Потом запустите eco_on.bat ещё раз.'; exit }; Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue; $s = Get-MpComputerStatus; if ($s.RealTimeProtectionEnabled) { Write-Host '      [x] Защита в реальном времени осталась включённой' } else { Write-Host '      Защита в реальном времени ВЫКЛЮЧЕНА. Windows включит её сама через некоторое время или после перезагрузки.' }"
+:defender_done
 
 echo.
 echo ====================== ГОТОВО: эконом-режим включён ======================

@@ -9,6 +9,7 @@ chcp 65001 >nul
 ::   - возвращает яркость экрана
 ::   - возвращает тип запуска служб и запускает те, что были автоматическими
 ::   - снимает запрет фоновой работы приложений Microsoft Store
+::   - Защитник Windows: возвращает защиту в реальном времени и настройки проверок
 ::  Если файла состояния нет - делает безопасный возврат к умолчаниям.
 ::
 ::  Запуск: двойной клик, права администратора запрашиваются автоматически.
@@ -46,6 +47,7 @@ set "FALLBACK="
 set "ORIG_SCHEME="
 set "ORIG_BRIGHT="
 set "BGAPPS=NONE"
+set "DEF_CPU="
 if exist "%STATE%" (
     for /f "usebackq tokens=1,* delims==" %%a in ("%STATE%") do set "%%a=%%b"
 ) else (
@@ -89,15 +91,24 @@ for %%s in (%SERVICES%) do call :svc_default %%s
 :services_done
 
 :: ---------------------- 4. Фоновые приложения ----------------------
-echo [4/5] Возвращаю настройку фоновых приложений Microsoft Store
+echo [4/6] Возвращаю настройку фоновых приложений Microsoft Store
 if /i "%BGAPPS%"=="NONE" (
     reg delete "%REG_BG%" /v LetAppsRunInBackground /f >nul 2>&1
 ) else (
     reg add "%REG_BG%" /v LetAppsRunInBackground /t REG_DWORD /d %BGAPPS% /f >nul 2>&1
 )
 
-:: ---------------------- 5. Файл состояния ----------------------
-echo [5/5] Убираю файл состояния
+:: ---------------------- 5. Защитник Windows ----------------------
+echo [5/6] Защитник Windows: возвращаю защиту в реальном времени и настройки проверок
+if defined DEF_CPU goto :defender_restore
+powershell -NoProfile -Command "Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction SilentlyContinue; Set-MpPreference -ScanAvgCPULoadFactor 50 -ErrorAction SilentlyContinue; Set-MpPreference -ScanOnlyIfIdleEnabled $true -ErrorAction SilentlyContinue; Set-MpPreference -DisableCatchupQuickScan $true -ErrorAction SilentlyContinue; Set-MpPreference -DisableCatchupFullScan $true -ErrorAction SilentlyContinue; Set-MpPreference -ScanScheduleDay 0 -ErrorAction SilentlyContinue"
+goto :defender_done
+:defender_restore
+powershell -NoProfile -Command "Set-MpPreference -DisableRealtimeMonitoring ([bool]%DEF_RT%) -ErrorAction SilentlyContinue; Set-MpPreference -ScanAvgCPULoadFactor %DEF_CPU% -ErrorAction SilentlyContinue; Set-MpPreference -ScanOnlyIfIdleEnabled ([bool]%DEF_IDLE%) -ErrorAction SilentlyContinue; Set-MpPreference -DisableCatchupQuickScan ([bool]%DEF_CQ%) -ErrorAction SilentlyContinue; Set-MpPreference -DisableCatchupFullScan ([bool]%DEF_CF%) -ErrorAction SilentlyContinue; Set-MpPreference -ScanScheduleDay %DEF_DAY% -ErrorAction SilentlyContinue"
+:defender_done
+
+:: ---------------------- 6. Файл состояния ----------------------
+echo [6/6] Убираю файл состояния
 if exist "%STATE%" move /y "%STATE%" "%STATE_DIR%\state.last.txt" >nul
 
 echo.
