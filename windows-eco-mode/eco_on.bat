@@ -16,6 +16,8 @@ chcp 65001 >nul
 ::   - останавливает и отключает некритичные фоновые службы (список ниже)
 ::   - запрещает фоновую работу приложений Store, виджеты, фоновый режим Edge и Chrome
 ::   - от батареи отключает сетевое подключение в режиме ожидания (сон)
+::   - телеметрия, отчёты об ошибках, фоновые проверки обновлений Windows и Store:
+::     службы, политики и задания планировщика выкл.
 ::   - Защитник Windows: плановые проверки выкл., лимит CPU для проверок,
 ::     защита в реальном времени выкл. (только если выключена Защита от подделки)
 ::
@@ -50,11 +52,11 @@ rem   1 = отключать защиту Защитника в реальном
 rem   Работает только если в Безопасности Windows выключена "Защита от подделки":
 rem   Windows специально не даёт сделать это скриптом. 0 = защиту не трогать,
 rem   тогда остаётся только безопасная экономия: плановые проверки выкл., лимит CPU.
-set "SERVICES=WSearch SysMain DiagTrack DoSvc wuauserv MapsBroker WMPNetworkSvc XblAuthManager XblGameSave XboxNetApiSvc XboxGipSvc edgeupdate edgeupdatem gupdate gupdatem"
+set "SERVICES=WSearch SysMain DiagTrack WerSvc DoSvc wuauserv InstallService MapsBroker WMPNetworkSvc XblAuthManager XblGameSave XboxNetApiSvc XboxGipSvc edgeupdate edgeupdatem gupdate gupdatem"
 rem   службы, которые будут остановлены и отключены до запуска eco_off.bat.
 rem   Все некритичные: индексация поиска, SysMain, телеметрия, оптимизация
-rem   доставки и Центр обновления, автономные карты, общий доступ к медиа, Xbox,
-rem   автообновление Edge и Google.
+rem   отчёты об ошибках, доставки и Центр обновления, установка из Store, автономные
+rem   карты, общий доступ к медиа, Xbox, автообновление Edge и Google.
 rem   Уберите wuauserv, если обновления Windows должны идти и в эконом-режиме.
 :: -----------------------------------------------------------------------
 
@@ -63,16 +65,62 @@ set "BALANCED=381b4222-f694-41f0-9685-ff5bb260df2e"
 set "STATE_DIR=%ProgramData%\EcoMode"
 set "STATE=%STATE_DIR%\state.txt"
 set "REG_PS=HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes"
-set "POL_COUNT=6"
+set "POL_COUNT=11"
 set "POL1=HKLM\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy;LetAppsRunInBackground;2"
 set "POL2=HKLM\SOFTWARE\Policies\Microsoft\Dsh;AllowNewsAndInterests;0"
 set "POL3=HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Feeds;EnableFeeds;0"
 set "POL4=HKLM\SOFTWARE\Policies\Microsoft\Edge;StartupBoostEnabled;0"
 set "POL5=HKLM\SOFTWARE\Policies\Microsoft\Edge;BackgroundModeEnabled;0"
 set "POL6=HKLM\SOFTWARE\Policies\Google\Chrome;BackgroundModeEnabled;0"
+set "POL7=HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection;AllowTelemetry;0"
+set "POL8=HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting;Disabled;1"
+set "POL9=HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsAI;DisableAIDataAnalysis;1"
+set "POL10=HKLM\SOFTWARE\Policies\Microsoft\Edge;DiagnosticData;0"
+set "POL11=HKLM\SOFTWARE\Policies\Google\Chrome;MetricsReportingEnabled;0"
 rem   политики реестра вида "ключ;значение;данные": фоновые приложения Store запрещены,
 rem   виджеты Windows 11 и "Новости и интересы" Windows 10 выкл., ускоренный запуск и
-rem   фоновый режим Edge выкл., фоновый режим Chrome выкл. Исходные данные сохраняются.
+rem   фоновый режим Edge выкл., фоновый режим Chrome выкл., телеметрия Windows на минимум,
+rem   отчёты об ошибках выкл., снимки Recall выкл., диагностика Edge и Chrome выкл.
+rem   Исходные данные сохраняются.
+set "TASKS=\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser"
+set "TASKS=%TASKS%;\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser Exp"
+set "TASKS=%TASKS%;\Microsoft\Windows\Application Experience\ProgramDataUpdater"
+set "TASKS=%TASKS%;\Microsoft\Windows\Application Experience\PcaPatchDbTask"
+set "TASKS=%TASKS%;\Microsoft\Windows\Customer Experience Improvement Program\Consolidator"
+set "TASKS=%TASKS%;\Microsoft\Windows\Customer Experience Improvement Program\UsbCeip"
+set "TASKS=%TASKS%;\Microsoft\Windows\Autochk\Proxy"
+set "TASKS=%TASKS%;\Microsoft\Windows\Feedback\Siuf\DmClient"
+set "TASKS=%TASKS%;\Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload"
+set "TASKS=%TASKS%;\Microsoft\Windows\Windows Error Reporting\QueueReporting"
+set "TASKS=%TASKS%;\Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector"
+set "TASKS=%TASKS%;\Microsoft\Windows\Diagnosis\Scheduled"
+set "TASKS=%TASKS%;\Microsoft\Windows\Diagnosis\RecommendedTroubleshootingScanner"
+set "TASKS=%TASKS%;\Microsoft\Windows\Device Information\Device"
+set "TASKS=%TASKS%;\Microsoft\Windows\Device Information\Device User"
+set "TASKS=%TASKS%;\Microsoft\Windows\PI\Sqm-Tasks"
+set "TASKS=%TASKS%;\Microsoft\Windows\NetTrace\GatherNetworkInfo"
+set "TASKS=%TASKS%;\Microsoft\Windows\PerfTrack\BackgroundConfigSurveyor"
+set "TASKS=%TASKS%;\Microsoft\Windows\Maintenance\WinSAT"
+set "TASKS=%TASKS%;\Microsoft\Windows\Power Efficiency Diagnostics\AnalyzeSystem"
+set "TASKS=%TASKS%;\Microsoft\Windows\Device Setup\Metadata Refresh"
+set "TASKS=%TASKS%;\Microsoft\Windows\WindowsUpdate\Scheduled Start"
+set "TASKS=%TASKS%;\Microsoft\Windows\InstallService\ScanForUpdates"
+set "TASKS=%TASKS%;\Microsoft\Windows\InstallService\ScanForUpdatesAsUser"
+set "TASKS=%TASKS%;\Microsoft\Windows\InstallService\SmartRetry"
+set "TASKS=%TASKS%;\Microsoft\Windows\InstallService\WakeUpAndContinueUpdates"
+set "TASKS=%TASKS%;\Microsoft\Windows\InstallService\WakeUpAndScanForUpdates"
+set "TASKS=%TASKS%;\Microsoft\Windows\Speech\SpeechModelDownloadTask"
+set "TASKS=%TASKS%;\Microsoft\Windows\Maps\MapsUpdateTask"
+set "TASKS=%TASKS%;\Microsoft\Windows\Maps\MapsToastTask"
+set "TASKS=%TASKS%;\Microsoft\Windows\Windows Media Sharing\UpdateLibrary"
+set "TASKS=%TASKS%;\Microsoft\Windows\SettingSync\BackgroundUploadTask"
+set "TASKS=%TASKS%;\Microsoft\Windows\SettingSync\BackupTask"
+set "TASKS=%TASKS%;\Microsoft\XblGameSave\XblGameSaveTask"
+set "TASKS=%TASKS%;\Microsoft\Office\OfficeTelemetryAgentFallBack2016"
+set "TASKS=%TASKS%;\Microsoft\Office\OfficeTelemetryAgentLogOn2016"
+rem   задания планировщика, которые будут отключены: телеметрия и оценка совместимости,
+rem   программа улучшения качества, отзывы, отчёты об ошибках, диагностика, фоновые
+rem   проверки обновлений Windows и Store, загрузка карт и речевых моделей, Office-телеметрия.
 
 :: ---------------------- Права администратора ----------------------
 fltmc >nul 2>&1
@@ -100,7 +148,7 @@ if exist "%STATE%" (
 )
 
 :: ---------------------- 1. Сохранение текущего состояния ----------------------
-echo [1/7] Сохраняю текущее состояние в %STATE%
+echo [1/8] Сохраняю текущее состояние в %STATE%
 set "ORIG_SCHEME="
 for /f "tokens=3" %%g in ('reg query "%REG_PS%" /v ActivePowerScheme 2^>nul ^| findstr /i "ActivePowerScheme"') do set "ORIG_SCHEME=%%g"
 if not defined ORIG_SCHEME set "ORIG_SCHEME=%BALANCED%"
@@ -130,18 +178,20 @@ for /l %%i in (1,1,%POL_COUNT%) do (
 
 powershell -NoProfile -Command "$p = Get-MpPreference -ErrorAction SilentlyContinue; if ($p) { Add-Content -LiteralPath '%STATE%' -Value ('DEF_RT=' + [int]$p.DisableRealtimeMonitoring), ('DEF_CPU=' + [int]$p.ScanAvgCPULoadFactor), ('DEF_IDLE=' + [int]$p.ScanOnlyIfIdleEnabled), ('DEF_CQ=' + [int]$p.DisableCatchupQuickScan), ('DEF_CF=' + [int]$p.DisableCatchupFullScan), ('DEF_DAY=' + [int]$p.ScanScheduleDay) }"
 
+powershell -NoProfile -Command "foreach ($t in '%TASKS%' -split ';') { $i = $t.LastIndexOf('\'); $task = Get-ScheduledTask -TaskPath $t.Substring(0, $i + 1) -TaskName $t.Substring($i + 1) -ErrorAction SilentlyContinue; if ($task) { Add-Content -LiteralPath '%STATE%' -Value ('TASK=' + $t + ';' + $task.State) } }"
+
 :apply
 if not defined ORIG_SCHEME set "ORIG_SCHEME=%BALANCED%"
 
 :: ---------------------- 2. Схема электропитания "Eco" ----------------------
-echo [2/7] Создаю схему электропитания "Eco" на основе текущей
+echo [2/8] Создаю схему электропитания "Eco" на основе текущей
 powercfg /setactive %ORIG_SCHEME% >nul 2>&1 || powercfg /setactive %BALANCED% >nul 2>&1
 powercfg /delete %ECO_GUID% >nul 2>&1
 powercfg /duplicatescheme %ORIG_SCHEME% %ECO_GUID% >nul 2>&1 || powercfg /duplicatescheme %BALANCED% %ECO_GUID% >nul 2>&1
 powercfg /changename %ECO_GUID% "Eco" "Economy mode created by eco_on.bat" >nul 2>&1
 
 :: ---------------------- 3. Настройки экономии ----------------------
-echo [3/7] Применяю настройки экономии: процессор, диски, PCIe, USB, Wi-Fi, экран, медиа
+echo [3/8] Применяю настройки экономии: процессор, диски, PCIe, USB, Wi-Fi, экран, медиа
 set "AC=call :setac"
 set "DC=call :setdc"
 set "BOTH=call :setboth"
@@ -205,11 +255,11 @@ rem --- Экономия заряда Windows: порог 100 (всегда от
 powercfg /setactive %ECO_GUID% >nul 2>&1 || echo       [x] Не удалось активировать схему Eco. Проверьте: powercfg /list
 
 :: ---------------------- 4. Яркость ----------------------
-echo [4/7] Яркость экрана: %BRIGHTNESS%%%
+echo [4/8] Яркость экрана: %BRIGHTNESS%%%
 powershell -NoProfile -Command "Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightnessMethods -ErrorAction SilentlyContinue | ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName WmiSetBrightness -Arguments @{Timeout=[uint32]1; Brightness=[byte]%BRIGHTNESS%} | Out-Null }"
 
 :: ---------------------- 5. Фоновые службы ----------------------
-echo [5/7] Останавливаю и отключаю некритичные фоновые службы
+echo [5/8] Останавливаю и отключаю некритичные фоновые службы
 for %%s in (%SERVICES%) do (
     reg query "HKLM\SYSTEM\CurrentControlSet\Services\%%s" /v Start >nul 2>&1 && (
         sc config %%s start= disabled >nul 2>&1
@@ -219,15 +269,19 @@ for %%s in (%SERVICES%) do (
 )
 
 :: ---------------------- 6. Политики: фоновые приложения, виджеты, браузеры ----------------------
-echo [6/7] Запрещаю фоновые приложения Store, виджеты, фоновый режим Edge и Chrome
+echo [6/8] Запрещаю фоновые приложения Store, виджеты, фоновый режим Edge и Chrome
 for /l %%i in (1,1,%POL_COUNT%) do (
     for /f "tokens=1-3 delims=;" %%k in ("!POL%%i!") do reg add "%%k" /v "%%l" /t REG_DWORD /d %%m /f >nul 2>&1
 )
 taskkill /f /im Widgets.exe >nul 2>&1
 taskkill /f /im WidgetService.exe >nul 2>&1
 
-:: ---------------------- 7. Защитник Windows ----------------------
-echo [7/7] Защитник Windows: плановые проверки выкл., лимит CPU для проверок 5 проц.
+:: ---------------------- 7. Задания планировщика ----------------------
+echo [7/8] Отключаю задания планировщика: телеметрия, отчёты об ошибках, проверки обновлений
+powershell -NoProfile -Command "foreach ($t in '%TASKS%' -split ';') { $i = $t.LastIndexOf('\'); Get-ScheduledTask -TaskPath $t.Substring(0, $i + 1) -TaskName $t.Substring($i + 1) -ErrorAction SilentlyContinue | Where-Object { $_.State -ne 'Disabled' } | ForEach-Object { $_ | Disable-ScheduledTask -ErrorAction SilentlyContinue | Out-Null; Write-Host ('      - ' + $_.TaskPath + $_.TaskName) } }"
+
+:: ---------------------- 8. Защитник Windows ----------------------
+echo [8/8] Защитник Windows: плановые проверки выкл., лимит CPU для проверок 5 проц.
 powershell -NoProfile -Command "Set-MpPreference -ScanAvgCPULoadFactor 5 -ErrorAction SilentlyContinue; Set-MpPreference -ScanOnlyIfIdleEnabled $true -ErrorAction SilentlyContinue; Set-MpPreference -DisableCatchupQuickScan $true -ErrorAction SilentlyContinue; Set-MpPreference -DisableCatchupFullScan $true -ErrorAction SilentlyContinue; Set-MpPreference -ScanScheduleDay 8 -ErrorAction SilentlyContinue"
 if not "%DEFENDER_OFF%"=="1" goto :defender_done
 powershell -NoProfile -Command "$s = Get-MpComputerStatus -ErrorAction SilentlyContinue; if (-not $s) { Write-Host '      Защитник Windows не найден - пропускаю'; exit }; if ($s.AMRunningMode -ne 'Normal') { Write-Host ('      Защитник в режиме ' + $s.AMRunningMode + ': защитой управляет другой антивирус, отключайте его в его собственных настройках'); exit }; if ($s.IsTamperProtected) { Write-Host '      [x] Включена Защита от подделки: Windows не даёт отключить защиту в реальном времени скриптом.'; Write-Host '          Вручную: Безопасность Windows - Защита от вирусов и угроз - Управление настройками - Защита от подделки: Выкл. Потом запустите eco_on.bat ещё раз.'; exit }; Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue; $s = Get-MpComputerStatus; if ($s.RealTimeProtectionEnabled) { Write-Host '      [x] Защита в реальном времени осталась включённой' } else { Write-Host '      Защита в реальном времени ВЫКЛЮЧЕНА. Windows включит её сама через некоторое время или после перезагрузки.' }"

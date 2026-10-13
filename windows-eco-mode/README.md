@@ -43,8 +43,10 @@
 | `WSearch` | индексация поиска Windows, грузит диск и CPU в фоне | поиск в «Пуске» и Проводнике работает медленнее, поиск в Outlook неполный |
 | `SysMain` | Superfetch, предзагрузка программ в память | программы запускаются чуть медленнее |
 | `DiagTrack` | телеметрия Microsoft | нет |
+| `WerSvc` | отчёты об ошибках (Windows Error Reporting) | при падении программы нет окна «прекратила работу», отчёт не отправляется |
 | `DoSvc` | оптимизация доставки, раздача обновлений другим ПК | загрузки из Microsoft Store приостановлены |
 | `wuauserv` | Центр обновления Windows: проверка и скачивание обновлений | обновления не ставятся, пока включён эконом-режим (уберите из списка, если это нежелательно) |
+| `InstallService` | установка и обновление приложений Microsoft Store | Store не ставит и не обновляет приложения в эконом-режиме |
 | `MapsBroker` | загрузка автономных карт | нет |
 | `WMPNetworkSvc` | общий доступ к медиа (DLNA) | нет |
 | `XblAuthManager`, `XblGameSave`, `XboxNetApiSvc`, `XboxGipSvc` | службы Xbox | приложение Xbox и Game Pass не работают |
@@ -72,6 +74,20 @@
 | `Windows Feeds\EnableFeeds = 0` | «Новости и интересы» Windows 10 выключены |
 | `Edge\StartupBoostEnabled = 0`, `Edge\BackgroundModeEnabled = 0` | Edge не висит в памяти после закрытия и не стартует заранее (применится после перезапуска Edge) |
 | `Chrome\BackgroundModeEnabled = 0` | Chrome не работает в фоне после закрытия окна |
+| `DataCollection\AllowTelemetry = 0` | диагностические данные Windows на минимум (на Home/Pro Windows считает это уровнем «обязательные») |
+| `Windows Error Reporting\Disabled = 1` | отчёты об ошибках не собираются и не отправляются |
+| `WindowsAI\DisableAIDataAnalysis = 1` | снимки Recall на Copilot+ ПК выключены (на остальных ничего не меняет) |
+| `Edge\DiagnosticData = 0`, `Chrome\MetricsReportingEnabled = 0` | браузеры не отправляют диагностику |
+
+## Телеметрия, отчёты об ошибках, проверки обновлений
+
+Отключается на трёх уровнях, чтобы ничего не просыпалось в фоне:
+
+1. **Службы:** `DiagTrack` (телеметрия), `WerSvc` (отчёты об ошибках), `wuauserv` и `DoSvc` (Центр обновления и доставка), `InstallService` (обновления Store), автообновление Edge и Google.
+2. **Политики:** телеметрия на минимум, отчёты об ошибках выкл., диагностика Edge и Chrome выкл. (таблица выше).
+3. **Задания планировщика** (список `TASKS` в начале `eco_on.bat`, исходное состояние каждого сохраняется): оценка совместимости `Microsoft Compatibility Appraiser` (процесс `CompatTelRunner.exe`, один из главных пожирателей CPU в фоне), `ProgramDataUpdater`, `PcaPatchDbTask`, программа улучшения качества (`Consolidator`, `UsbCeip`), `Autochk\Proxy`, отзывы (`DmClient`), отчёты об ошибках (`QueueReporting`), сбор диагностики дисков и системы, `Device Information`, `Sqm-Tasks`, `GatherNetworkInfo`, `BackgroundConfigSurveyor`, `WinSAT`, `AnalyzeSystem`, `Metadata Refresh`, фоновые проверки обновлений Windows (`WindowsUpdate\Scheduled Start`) и Store (`InstallService\*`), загрузка речевых моделей и карт, синхронизация параметров, Xbox, Office-телеметрия. Задания, которых нет на компьютере, пропускаются.
+
+Что Windows не даёт отключить, и скрипт не пытается: службы `UsoSvc` и `WaaSMedicSvc` и задания `UpdateOrchestrator\*` защищены системой. `WaaSMedicSvc` может сам вернуть службе `wuauserv` тип запуска «вручную», это нормально, `eco_off.bat` в любом случае вернёт исходное.
 
 ## Защитник Windows
 
