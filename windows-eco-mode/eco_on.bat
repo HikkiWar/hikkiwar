@@ -11,20 +11,23 @@ chcp 65001 >nul
 ::     охлаждение пассивное, приоритет энергоэффективности
 ::   - диски: отключение через 1 мин простоя, энергосбережение AHCI / NVMe
 ::   - PCI Express, USB, Wi-Fi адаптер - режим экономии (Wi-Fi НЕ отключается)
+::   - от батареи отключает сетевое подключение в режиме ожидания (сон)
 ::   - видео и медиа - приоритет экономии, слайд-шоу обоев на паузе
 ::   - "Экономия заряда" Windows (Energy Saver) - включена всегда
 ::   - останавливает и отключает некритичные фоновые службы (список ниже)
-::   - запрещает фоновую работу приложений Store, виджеты, фоновый режим Edge и Chrome
-::   - от батареи отключает сетевое подключение в режиме ожидания (сон)
-::   - телеметрия, отчёты об ошибках, фоновые проверки обновлений Windows и Store:
-::     службы, политики и задания планировщика выкл.
+::   - политики: фоновые приложения Store, виджеты, фоновый режим Edge и Chrome,
+::     телеметрия, отчёты об ошибках, Recall, диагностика браузеров
+::   - отключает задания планировщика: телеметрия, отчёты об ошибках,
+::     фоновые проверки обновлений Windows и Store и прочее (список ниже)
 ::   - Защитник Windows: плановые проверки выкл., лимит CPU для проверок,
 ::     защита в реальном времени выкл. (только если выключена Защита от подделки)
 ::
 ::  Что НЕ трогает: таймеры сна, гибернации и отключения экрана, действия
-::  крышки и кнопок, Wi-Fi, Bluetooth, сеть, Защитник Windows, звук,
-::  системные службы. Исходное состояние сохраняется в файл
-::  C:\ProgramData\EcoMode\state.txt и возвращается скриптом eco_off.bat.
+::  крышки и кнопок, Wi-Fi, Bluetooth, сеть, звук, системные службы.
+::
+::  Папка состояния и журнала: C:\ProgramData\EcoMode
+::   state.txt - исходные настройки, их возвращает eco_off.bat
+::   eco.log   - журнал обоих скриптов: каждая команда, её вывод, код ошибки
 ::
 ::  Запуск: двойной клик, права администратора запрашиваются автоматически.
 ::  Файл должен быть сохранён в кодировке UTF-8 без BOM.
@@ -54,9 +57,9 @@ rem   Windows специально не даёт сделать это скри�
 rem   тогда остаётся только безопасная экономия: плановые проверки выкл., лимит CPU.
 set "SERVICES=WSearch SysMain DiagTrack WerSvc DoSvc wuauserv InstallService MapsBroker WMPNetworkSvc XblAuthManager XblGameSave XboxNetApiSvc XboxGipSvc edgeupdate edgeupdatem gupdate gupdatem"
 rem   службы, которые будут остановлены и отключены до запуска eco_off.bat.
-rem   Все некритичные: индексация поиска, SysMain, телеметрия, оптимизация
-rem   отчёты об ошибках, доставки и Центр обновления, установка из Store, автономные
-rem   карты, общий доступ к медиа, Xbox, автообновление Edge и Google.
+rem   Все некритичные: индексация поиска, SysMain, телеметрия, отчёты об ошибках,
+rem   оптимизация доставки и Центр обновления, установка из Store, автономные карты,
+rem   общий доступ к медиа, Xbox, автообновление Edge и Google.
 rem   Уберите wuauserv, если обновления Windows должны идти и в эконом-режиме.
 :: -----------------------------------------------------------------------
 
@@ -64,6 +67,7 @@ set "ECO_GUID=ec0ec0ec-0000-4000-8000-0000000ec0ba"
 set "BALANCED=381b4222-f694-41f0-9685-ff5bb260df2e"
 set "STATE_DIR=%ProgramData%\EcoMode"
 set "STATE=%STATE_DIR%\state.txt"
+set "LOG=%STATE_DIR%\eco.log"
 set "REG_PS=HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes"
 set "POL_COUNT=11"
 set "POL1=HKLM\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy;LetAppsRunInBackground;2"
@@ -135,29 +139,43 @@ if errorlevel 1 (
     exit /b
 )
 
+:: ---------------------- Журнал ----------------------
 title Eco mode - ON
+if not exist "%STATE_DIR%" mkdir "%STATE_DIR%" >nul 2>&1
+if not exist "%STATE_DIR%" (
+    echo [x] Не удалось создать папку %STATE_DIR%
+    pause
+    exit /b 1
+)
+if exist "%LOG%" for %%A in ("%LOG%") do if %%~zA GTR 1048576 move /y "%LOG%" "%LOG%.old" >nul 2>&1
+set "ERRORS=0"
+>>"%LOG%" echo.
+>>"%LOG%" echo ===== eco_on.bat  %DATE% %TIME%  %COMPUTERNAME%\%USERNAME% =====
 echo.
 echo ====================== ЭКОНОМ-РЕЖИМ: ВКЛЮЧЕНИЕ ======================
+echo   Журнал: %LOG%
 echo.
-if not exist "%STATE_DIR%" mkdir "%STATE_DIR%"
+where powershell >nul 2>&1 || call :fail PowerShell не найден, часть шагов не выполнится
 
 if exist "%STATE%" (
-    echo [i] Эконом-режим уже включался ранее: исходные настройки сохранены, применяю повторно.
+    call :say [i] Эконом-режим уже включался ранее: исходные настройки сохранены, применяю повторно.
     for /f "usebackq tokens=1,* delims==" %%a in ("%STATE%") do if "%%a"=="ORIG_SCHEME" set "ORIG_SCHEME=%%b"
     goto :apply
 )
 
 :: ---------------------- 1. Сохранение текущего состояния ----------------------
-echo [1/8] Сохраняю текущее состояние в %STATE%
+call :say [1/8] Сохраняю текущее состояние в %STATE%
 set "ORIG_SCHEME="
 for /f "tokens=3" %%g in ('reg query "%REG_PS%" /v ActivePowerScheme 2^>nul ^| findstr /i "ActivePowerScheme"') do set "ORIG_SCHEME=%%g"
+if not defined ORIG_SCHEME call :note [i] Активная схема не найдена в реестре, считаю её Сбалансированной
 if not defined ORIG_SCHEME set "ORIG_SCHEME=%BALANCED%"
 if /i "%ORIG_SCHEME%"=="%ECO_GUID%" set "ORIG_SCHEME=%BALANCED%"
 
 set "ORIG_BRIGHT="
 for /f "usebackq delims=" %%b in (`powershell -NoProfile -Command "Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightness -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty CurrentBrightness"`) do set "ORIG_BRIGHT=%%b"
+if not defined ORIG_BRIGHT call :note [i] Яркость не прочитана: экран не управляется через WMI, яркость вернёт схема питания
 
-> "%STATE%" echo ORIG_SCHEME=%ORIG_SCHEME%
+> "%STATE%" echo ORIG_SCHEME=%ORIG_SCHEME% || call :fail Не удалось записать файл состояния %STATE%
 >>"%STATE%" echo ORIG_BRIGHT=%ORIG_BRIGHT%
 
 for %%s in (%SERVICES%) do (
@@ -176,22 +194,30 @@ for /l %%i in (1,1,%POL_COUNT%) do (
     )
 )
 
-powershell -NoProfile -Command "$p = Get-MpPreference -ErrorAction SilentlyContinue; if ($p) { Add-Content -LiteralPath '%STATE%' -Value ('DEF_RT=' + [int]$p.DisableRealtimeMonitoring), ('DEF_CPU=' + [int]$p.ScanAvgCPULoadFactor), ('DEF_IDLE=' + [int]$p.ScanOnlyIfIdleEnabled), ('DEF_CQ=' + [int]$p.DisableCatchupQuickScan), ('DEF_CF=' + [int]$p.DisableCatchupFullScan), ('DEF_DAY=' + [int]$p.ScanScheduleDay) }"
+call :run powershell -NoProfile -Command "$p = Get-MpPreference -ErrorAction SilentlyContinue; if ($p) { Add-Content -LiteralPath '%STATE%' -Value ('DEF_RT=' + [int]$p.DisableRealtimeMonitoring), ('DEF_CPU=' + [int]$p.ScanAvgCPULoadFactor), ('DEF_IDLE=' + [int]$p.ScanOnlyIfIdleEnabled), ('DEF_CQ=' + [int]$p.DisableCatchupQuickScan), ('DEF_CF=' + [int]$p.DisableCatchupFullScan), ('DEF_DAY=' + [int]$p.ScanScheduleDay) }"
 
-powershell -NoProfile -Command "foreach ($t in '%TASKS%' -split ';') { $i = $t.LastIndexOf('\'); $task = Get-ScheduledTask -TaskPath $t.Substring(0, $i + 1) -TaskName $t.Substring($i + 1) -ErrorAction SilentlyContinue; if ($task) { Add-Content -LiteralPath '%STATE%' -Value ('TASK=' + $t + ';' + $task.State) } }"
+call :run powershell -NoProfile -Command "foreach ($t in '%TASKS%' -split ';') { $i = $t.LastIndexOf('\'); $task = Get-ScheduledTask -TaskPath $t.Substring(0, $i + 1) -TaskName $t.Substring($i + 1) -ErrorAction SilentlyContinue; if ($task) { Add-Content -LiteralPath '%STATE%' -Value ('TASK=' + $t + ';' + $task.State) } }"
+
+>>"%LOG%" echo --- содержимое %STATE% ---
+>>"%LOG%" type "%STATE%"
+>>"%LOG%" echo --- конец state.txt ---
 
 :apply
 if not defined ORIG_SCHEME set "ORIG_SCHEME=%BALANCED%"
 
 :: ---------------------- 2. Схема электропитания "Eco" ----------------------
-echo [2/8] Создаю схему электропитания "Eco" на основе текущей
-powercfg /setactive %ORIG_SCHEME% >nul 2>&1 || powercfg /setactive %BALANCED% >nul 2>&1
-powercfg /delete %ECO_GUID% >nul 2>&1
-powercfg /duplicatescheme %ORIG_SCHEME% %ECO_GUID% >nul 2>&1 || powercfg /duplicatescheme %BALANCED% %ECO_GUID% >nul 2>&1
-powercfg /changename %ECO_GUID% "Eco" "Economy mode created by eco_on.bat" >nul 2>&1
+call :say [2/8] Создаю схему электропитания "Eco" на основе текущей
+call :try powercfg /setactive %ORIG_SCHEME%
+call :try powercfg /delete %ECO_GUID%
+call :try powercfg /duplicatescheme %ORIG_SCHEME% %ECO_GUID%
+powercfg /query %ECO_GUID% >nul 2>&1 || (
+    call :note Исходная схема недоступна, копирую "Сбалансированную"
+    call :run powercfg /duplicatescheme %BALANCED% %ECO_GUID%
+)
+call :try powercfg /changename %ECO_GUID% "Eco" "Economy mode created by eco_on.bat"
 
 :: ---------------------- 3. Настройки экономии ----------------------
-echo [3/8] Применяю настройки экономии: процессор, диски, PCIe, USB, Wi-Fi, экран, медиа
+call :say [3/8] Применяю настройки экономии: процессор, диски, PCIe, USB, Wi-Fi, экран, медиа
 set "AC=call :setac"
 set "DC=call :setdc"
 set "BOTH=call :setboth"
@@ -252,47 +278,58 @@ rem --- Экономия заряда Windows: порог 100 (всегда от
 %BOTH% de830923-a562-41af-a086-e3a2c6bad2da 13d09884-f74e-474a-a852-b6bde8ad03a8 100
 %BOTH% de830923-a562-41af-a086-e3a2c6bad2da 5c5bb349-ad29-4ee2-9d0b-2b25270f7a81 0
 
-powercfg /setactive %ECO_GUID% >nul 2>&1 || echo       [x] Не удалось активировать схему Eco. Проверьте: powercfg /list
+call :run powercfg /setactive %ECO_GUID%
+powercfg /getactivescheme | findstr /i "%ECO_GUID%" >nul || call :fail Схема Eco не активна, проверьте вывод powercfg /list
 
 :: ---------------------- 4. Яркость ----------------------
-echo [4/8] Яркость экрана: %BRIGHTNESS%%%
-powershell -NoProfile -Command "Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightnessMethods -ErrorAction SilentlyContinue | ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName WmiSetBrightness -Arguments @{Timeout=[uint32]1; Brightness=[byte]%BRIGHTNESS%} | Out-Null }"
+call :say [4/8] Яркость экрана: %BRIGHTNESS% проц.
+call :run powershell -NoProfile -Command "Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightnessMethods -ErrorAction SilentlyContinue | ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName WmiSetBrightness -Arguments @{Timeout=[uint32]1; Brightness=[byte]%BRIGHTNESS%} | Out-Null }"
 
 :: ---------------------- 5. Фоновые службы ----------------------
-echo [5/8] Останавливаю и отключаю некритичные фоновые службы
+call :say [5/8] Останавливаю и отключаю некритичные фоновые службы
 for %%s in (%SERVICES%) do (
     reg query "HKLM\SYSTEM\CurrentControlSet\Services\%%s" /v Start >nul 2>&1 && (
-        sc config %%s start= disabled >nul 2>&1
-        sc stop %%s >nul 2>&1
+        call :run sc config %%s start= disabled
+        call :try sc stop %%s
         echo       - %%s
     )
 )
 
-:: ---------------------- 6. Политики: фоновые приложения, виджеты, браузеры ----------------------
-echo [6/8] Запрещаю фоновые приложения Store, виджеты, фоновый режим Edge и Chrome
+:: ---------------------- 6. Политики: фоновые приложения, виджеты, браузеры, телеметрия ----------------------
+call :say [6/8] Политики: фоновые приложения Store, виджеты, Edge и Chrome, телеметрия, отчёты об ошибках
 for /l %%i in (1,1,%POL_COUNT%) do (
-    for /f "tokens=1-3 delims=;" %%k in ("!POL%%i!") do reg add "%%k" /v "%%l" /t REG_DWORD /d %%m /f >nul 2>&1
+    for /f "tokens=1-3 delims=;" %%k in ("!POL%%i!") do call :run reg add "%%k" /v "%%l" /t REG_DWORD /d %%m /f
 )
-taskkill /f /im Widgets.exe >nul 2>&1
-taskkill /f /im WidgetService.exe >nul 2>&1
+call :try taskkill /f /im Widgets.exe
+call :try taskkill /f /im WidgetService.exe
 
 :: ---------------------- 7. Задания планировщика ----------------------
-echo [7/8] Отключаю задания планировщика: телеметрия, отчёты об ошибках, проверки обновлений
-powershell -NoProfile -Command "foreach ($t in '%TASKS%' -split ';') { $i = $t.LastIndexOf('\'); Get-ScheduledTask -TaskPath $t.Substring(0, $i + 1) -TaskName $t.Substring($i + 1) -ErrorAction SilentlyContinue | Where-Object { $_.State -ne 'Disabled' } | ForEach-Object { $_ | Disable-ScheduledTask -ErrorAction SilentlyContinue | Out-Null; Write-Host ('      - ' + $_.TaskPath + $_.TaskName) } }"
+call :say [7/8] Отключаю задания планировщика: телеметрия, отчёты об ошибках, проверки обновлений
+powershell -NoProfile -Command "function L($m) { Write-Host $m; Add-Content -LiteralPath '%LOG%' -Value $m -Encoding UTF8 }; $n = 0; foreach ($t in '%TASKS%' -split ';') { $i = $t.LastIndexOf('\'); $task = Get-ScheduledTask -TaskPath $t.Substring(0, $i + 1) -TaskName $t.Substring($i + 1) -ErrorAction SilentlyContinue; if ($task -and $task.State -ne 'Disabled') { try { $task | Disable-ScheduledTask -ErrorAction Stop | Out-Null; $n++; L ('      - ' + $t) } catch { L ('      [x] не удалось отключить ' + $t + ': ' + $_.Exception.Message) } } }; L ('      отключено заданий: ' + $n)" 2>>"%LOG%"
 
 :: ---------------------- 8. Защитник Windows ----------------------
-echo [8/8] Защитник Windows: плановые проверки выкл., лимит CPU для проверок 5 проц.
-powershell -NoProfile -Command "Set-MpPreference -ScanAvgCPULoadFactor 5 -ErrorAction SilentlyContinue; Set-MpPreference -ScanOnlyIfIdleEnabled $true -ErrorAction SilentlyContinue; Set-MpPreference -DisableCatchupQuickScan $true -ErrorAction SilentlyContinue; Set-MpPreference -DisableCatchupFullScan $true -ErrorAction SilentlyContinue; Set-MpPreference -ScanScheduleDay 8 -ErrorAction SilentlyContinue"
+call :say [8/8] Защитник Windows: плановые проверки выкл., лимит CPU для проверок 5 проц.
+call :run powershell -NoProfile -Command "Set-MpPreference -ScanAvgCPULoadFactor 5 -ErrorAction SilentlyContinue; Set-MpPreference -ScanOnlyIfIdleEnabled $true -ErrorAction SilentlyContinue; Set-MpPreference -DisableCatchupQuickScan $true -ErrorAction SilentlyContinue; Set-MpPreference -DisableCatchupFullScan $true -ErrorAction SilentlyContinue; Set-MpPreference -ScanScheduleDay 8 -ErrorAction SilentlyContinue"
 if not "%DEFENDER_OFF%"=="1" goto :defender_done
-powershell -NoProfile -Command "$s = Get-MpComputerStatus -ErrorAction SilentlyContinue; if (-not $s) { Write-Host '      Защитник Windows не найден - пропускаю'; exit }; if ($s.AMRunningMode -ne 'Normal') { Write-Host ('      Защитник в режиме ' + $s.AMRunningMode + ': защитой управляет другой антивирус, отключайте его в его собственных настройках'); exit }; if ($s.IsTamperProtected) { Write-Host '      [x] Включена Защита от подделки: Windows не даёт отключить защиту в реальном времени скриптом.'; Write-Host '          Вручную: Безопасность Windows - Защита от вирусов и угроз - Управление настройками - Защита от подделки: Выкл. Потом запустите eco_on.bat ещё раз.'; exit }; Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue; $s = Get-MpComputerStatus; if ($s.RealTimeProtectionEnabled) { Write-Host '      [x] Защита в реальном времени осталась включённой' } else { Write-Host '      Защита в реальном времени ВЫКЛЮЧЕНА. Windows включит её сама через некоторое время или после перезагрузки.' }"
+powershell -NoProfile -Command "function L($m) { Write-Host $m; Add-Content -LiteralPath '%LOG%' -Value $m -Encoding UTF8 }; $s = Get-MpComputerStatus -ErrorAction SilentlyContinue; if (-not $s) { L '      Защитник Windows не найден - пропускаю'; exit }; if ($s.AMRunningMode -ne 'Normal') { L ('      Защитник в режиме ' + $s.AMRunningMode + ': защитой управляет другой антивирус, отключайте его в его собственных настройках'); exit }; if ($s.IsTamperProtected) { L '      [x] Включена Защита от подделки: Windows не даёт отключить защиту в реальном времени скриптом.'; L '          Вручную: Безопасность Windows - Защита от вирусов и угроз - Управление настройками - Защита от подделки: Выкл. Потом запустите eco_on.bat ещё раз.'; exit }; try { Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop } catch { L ('      [x] Set-MpPreference: ' + $_.Exception.Message) }; $s = Get-MpComputerStatus; if ($s.RealTimeProtectionEnabled) { L '      [x] Защита в реальном времени осталась включённой' } else { L '      Защита в реальном времени ВЫКЛЮЧЕНА. Windows включит её сама через некоторое время или после перезагрузки.' }" 2>>"%LOG%"
 :defender_done
 
+:: ---------------------- Итог ----------------------
 echo.
-echo ====================== ГОТОВО: эконом-режим включён ======================
+if %ERRORS%==0 (
+    echo ====================== ГОТОВО: эконом-режим включён, ошибок нет ======================
+    >>"%LOG%" echo [%TIME%] ГОТОВО, ошибок нет
+) else (
+    echo ====================== ГОТОВО: эконом-режим включён, ошибок: %ERRORS% ======================
+    >>"%LOG%" echo [%TIME%] ГОТОВО, ошибок: %ERRORS%
+    echo   Подробности в журнале: %LOG%
+)
 echo   Активная схема:
 powercfg /getactivescheme
+>>"%LOG%" powercfg /getactivescheme
 echo   Сохранённое состояние: %STATE%
 echo   Вернуть всё как было:  eco_off.bat
+>>"%LOG%" echo ===== конец eco_on.bat, ошибок: %ERRORS% =====
 echo.
 pause
 endlocal
@@ -300,15 +337,54 @@ chcp %OLDCP% >nul
 exit /b 0
 
 :: ---------------------- подпрограммы ----------------------
+:say
+rem  сообщение на экран и в журнал
+echo %*
+>>"%LOG%" echo [%TIME%] %*
+exit /b 0
+
+:fail
+rem  ошибка: счётчик, экран, журнал
+set /a ERRORS+=1
+echo       [x] %*
+>>"%LOG%" echo [%TIME%] [x] %*
+exit /b 0
+
+:note
+rem  пояснение с отступом на экран и в журнал
+echo       %*
+>>"%LOG%" echo [%TIME%]   %*
+exit /b 0
+
+:run
+rem  выполнить команду, вывод в журнал; ошибка считается и показывается
+>>"%LOG%" echo [%TIME%] ^> %*
+%* >>"%LOG%" 2>&1
+set "RC=!errorlevel!"
+if not "!RC!"=="0" (
+    set /a ERRORS+=1
+    >>"%LOG%" echo [%TIME%]   ОШИБКА, код !RC!
+    echo       [x] ошибка, код !RC!: %1 %2 %3 - подробности в журнале
+)
+exit /b 0
+
+:try
+rem  выполнить команду, вывод в журнал; ошибка допустима (настройки нет на этом ПК и т.п.)
+>>"%LOG%" echo [%TIME%] ^> %*
+%* >>"%LOG%" 2>&1
+set "RC=!errorlevel!"
+if not "!RC!"=="0" (>>"%LOG%" echo [%TIME%]   пропущено, код !RC!)
+exit /b 0
+
 :setac
-powercfg /setacvalueindex %ECO_GUID% %1 %2 %3 >nul 2>&1
+call :try powercfg /setacvalueindex %ECO_GUID% %1 %2 %3
 exit /b 0
 
 :setdc
-powercfg /setdcvalueindex %ECO_GUID% %1 %2 %3 >nul 2>&1
+call :try powercfg /setdcvalueindex %ECO_GUID% %1 %2 %3
 exit /b 0
 
 :setboth
-powercfg /setacvalueindex %ECO_GUID% %1 %2 %3 >nul 2>&1
-powercfg /setdcvalueindex %ECO_GUID% %1 %2 %3 >nul 2>&1
+call :try powercfg /setacvalueindex %ECO_GUID% %1 %2 %3
+call :try powercfg /setdcvalueindex %ECO_GUID% %1 %2 %3
 exit /b 0
