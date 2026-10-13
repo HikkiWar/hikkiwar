@@ -8,7 +8,7 @@ chcp 65001 >nul
 ::   - возвращает исходную схему электропитания и удаляет схему "Eco"
 ::   - возвращает яркость экрана
 ::   - возвращает тип запуска служб и запускает те, что были автоматическими
-::   - снимает запрет фоновой работы приложений Microsoft Store
+::   - возвращает политики: фоновые приложения Store, виджеты, Edge и Chrome
 ::   - Защитник Windows: возвращает защиту в реальном времени и настройки проверок
 ::  Если файла состояния нет - делает безопасный возврат к умолчаниям.
 ::
@@ -22,7 +22,15 @@ set "BALANCED=381b4222-f694-41f0-9685-ff5bb260df2e"
 set "STATE_DIR=%ProgramData%\EcoMode"
 set "STATE=%STATE_DIR%\state.txt"
 set "REG_BG=HKLM\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy"
-set "SERVICES=WSearch SysMain DiagTrack DoSvc wuauserv MapsBroker WMPNetworkSvc XblAuthManager XblGameSave XboxNetApiSvc XboxGipSvc"
+set "POL_COUNT=6"
+set "POL1=HKLM\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy;LetAppsRunInBackground;2"
+set "POL2=HKLM\SOFTWARE\Policies\Microsoft\Dsh;AllowNewsAndInterests;0"
+set "POL3=HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Feeds;EnableFeeds;0"
+set "POL4=HKLM\SOFTWARE\Policies\Microsoft\Edge;StartupBoostEnabled;0"
+set "POL5=HKLM\SOFTWARE\Policies\Microsoft\Edge;BackgroundModeEnabled;0"
+set "POL6=HKLM\SOFTWARE\Policies\Google\Chrome;BackgroundModeEnabled;0"
+rem   список политик нужен только если файл состояния не найден (тогда они удаляются)
+set "SERVICES=WSearch SysMain DiagTrack DoSvc wuauserv MapsBroker WMPNetworkSvc XblAuthManager XblGameSave XboxNetApiSvc XboxGipSvc edgeupdate edgeupdatem gupdate gupdatem"
 rem   список нужен только если файл состояния не найден
 
 :: ---------------------- Права администратора ----------------------
@@ -46,7 +54,7 @@ echo.
 set "FALLBACK="
 set "ORIG_SCHEME="
 set "ORIG_BRIGHT="
-set "BGAPPS=NONE"
+set "BGAPPS="
 set "DEF_CPU="
 if exist "%STATE%" (
     for /f "usebackq tokens=1,* delims==" %%a in ("%STATE%") do set "%%a=%%b"
@@ -90,13 +98,31 @@ for %%s in (%SERVICES%) do call :svc_default %%s
 
 :services_done
 
-:: ---------------------- 4. Фоновые приложения ----------------------
-echo [4/6] Возвращаю настройку фоновых приложений Microsoft Store
+:: ---------------------- 4. Политики: фоновые приложения, виджеты, браузеры ----------------------
+echo [4/6] Возвращаю политики: фоновые приложения Store, виджеты, Edge и Chrome
+if defined FALLBACK goto :policies_fallback
+for /f "usebackq tokens=1,* delims==" %%a in (`findstr /b "POL" "%STATE%"`) do (
+    for /f "tokens=1-3 delims=;" %%k in ("%%b") do (
+        if /i "%%m"=="NONE" (
+            reg delete "%%k" /v "%%l" /f >nul 2>&1
+        ) else (
+            reg add "%%k" /v "%%l" /t REG_DWORD /d %%m /f >nul 2>&1
+        )
+    )
+)
+if not defined BGAPPS goto :policies_done
+rem  файл состояния от старой версии eco_on.bat: одна политика фоновых приложений
 if /i "%BGAPPS%"=="NONE" (
     reg delete "%REG_BG%" /v LetAppsRunInBackground /f >nul 2>&1
 ) else (
     reg add "%REG_BG%" /v LetAppsRunInBackground /t REG_DWORD /d %BGAPPS% /f >nul 2>&1
 )
+goto :policies_done
+:policies_fallback
+for /l %%i in (1,1,%POL_COUNT%) do (
+    for /f "tokens=1-3 delims=;" %%k in ("!POL%%i!") do reg delete "%%k" /v "%%l" /f >nul 2>&1
+)
+:policies_done
 
 :: ---------------------- 5. Защитник Windows ----------------------
 echo [5/6] Защитник Windows: возвращаю защиту в реальном времени и настройки проверок

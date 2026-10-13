@@ -14,7 +14,8 @@ chcp 65001 >nul
 ::   - видео и медиа - приоритет экономии, слайд-шоу обоев на паузе
 ::   - "Экономия заряда" Windows (Energy Saver) - включена всегда
 ::   - останавливает и отключает некритичные фоновые службы (список ниже)
-::   - запрещает фоновую работу приложений из Microsoft Store
+::   - запрещает фоновую работу приложений Store, виджеты, фоновый режим Edge и Chrome
+::   - от батареи отключает сетевое подключение в режиме ожидания (сон)
 ::   - Защитник Windows: плановые проверки выкл., лимит CPU для проверок,
 ::     защита в реальном времени выкл. (только если выключена Защита от подделки)
 ::
@@ -49,10 +50,11 @@ rem   1 = отключать защиту Защитника в реальном
 rem   Работает только если в Безопасности Windows выключена "Защита от подделки":
 rem   Windows специально не даёт сделать это скриптом. 0 = защиту не трогать,
 rem   тогда остаётся только безопасная экономия: плановые проверки выкл., лимит CPU.
-set "SERVICES=WSearch SysMain DiagTrack DoSvc wuauserv MapsBroker WMPNetworkSvc XblAuthManager XblGameSave XboxNetApiSvc XboxGipSvc"
+set "SERVICES=WSearch SysMain DiagTrack DoSvc wuauserv MapsBroker WMPNetworkSvc XblAuthManager XblGameSave XboxNetApiSvc XboxGipSvc edgeupdate edgeupdatem gupdate gupdatem"
 rem   службы, которые будут остановлены и отключены до запуска eco_off.bat.
 rem   Все некритичные: индексация поиска, SysMain, телеметрия, оптимизация
-rem   доставки и Центр обновления, автономные карты, общий доступ к медиа, Xbox.
+rem   доставки и Центр обновления, автономные карты, общий доступ к медиа, Xbox,
+rem   автообновление Edge и Google.
 rem   Уберите wuauserv, если обновления Windows должны идти и в эконом-режиме.
 :: -----------------------------------------------------------------------
 
@@ -61,7 +63,16 @@ set "BALANCED=381b4222-f694-41f0-9685-ff5bb260df2e"
 set "STATE_DIR=%ProgramData%\EcoMode"
 set "STATE=%STATE_DIR%\state.txt"
 set "REG_PS=HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes"
-set "REG_BG=HKLM\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy"
+set "POL_COUNT=6"
+set "POL1=HKLM\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy;LetAppsRunInBackground;2"
+set "POL2=HKLM\SOFTWARE\Policies\Microsoft\Dsh;AllowNewsAndInterests;0"
+set "POL3=HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Feeds;EnableFeeds;0"
+set "POL4=HKLM\SOFTWARE\Policies\Microsoft\Edge;StartupBoostEnabled;0"
+set "POL5=HKLM\SOFTWARE\Policies\Microsoft\Edge;BackgroundModeEnabled;0"
+set "POL6=HKLM\SOFTWARE\Policies\Google\Chrome;BackgroundModeEnabled;0"
+rem   политики реестра вида "ключ;значение;данные": фоновые приложения Store запрещены,
+rem   виджеты Windows 11 и "Новости и интересы" Windows 10 выкл., ускоренный запуск и
+rem   фоновый режим Edge выкл., фоновый режим Chrome выкл. Исходные данные сохраняются.
 
 :: ---------------------- Права администратора ----------------------
 fltmc >nul 2>&1
@@ -109,9 +120,13 @@ for %%s in (%SERVICES%) do (
     if defined ST (>>"%STATE%" echo SVC_%%s=!ST!;!DL!)
 )
 
-set "BG=NONE"
-for /f "tokens=3" %%v in ('reg query "%REG_BG%" /v LetAppsRunInBackground 2^>nul ^| findstr /i "REG_DWORD"') do set "BG=%%v"
->>"%STATE%" echo BGAPPS=%BG%
+for /l %%i in (1,1,%POL_COUNT%) do (
+    for /f "tokens=1-3 delims=;" %%k in ("!POL%%i!") do (
+        set "CUR=NONE"
+        for /f "tokens=3" %%v in ('reg query "%%k" /v "%%l" 2^>nul ^| findstr /i "REG_DWORD"') do set "CUR=%%v"
+        >>"%STATE%" echo POL%%i=%%k;%%l;!CUR!
+    )
+)
 
 powershell -NoProfile -Command "$p = Get-MpPreference -ErrorAction SilentlyContinue; if ($p) { Add-Content -LiteralPath '%STATE%' -Value ('DEF_RT=' + [int]$p.DisableRealtimeMonitoring), ('DEF_CPU=' + [int]$p.ScanAvgCPULoadFactor), ('DEF_IDLE=' + [int]$p.ScanOnlyIfIdleEnabled), ('DEF_CQ=' + [int]$p.DisableCatchupQuickScan), ('DEF_CF=' + [int]$p.DisableCatchupFullScan), ('DEF_DAY=' + [int]$p.ScanScheduleDay) }"
 
@@ -160,6 +175,9 @@ rem --- USB: выборочная приостановка, USB3 Link Power Mana
 %BOTH% 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb50f7e206 1
 %BOTH% 2a737441-1930-4402-8d77-b2bebba308a3 d4e98f31-5ffe-4ce1-be31-1b38b384c009 3
 
+rem --- Сетевое подключение в режиме ожидания: от батареи выкл. (в работе Wi-Fi не трогается) ---
+%DC%   SUB_NONE f15576e8-98b7-4186-b944-eafa664402d9 0
+
 rem --- Wi-Fi адаптер: режим энергосбережения, адаптер остаётся включённым ---
 %BOTH% 19cbb8fa-5279-450e-9fac-8a3d5fedd0c1 12bbebe6-58d6-4636-95bb-3217ef867c1a %WIFI_PWR%
 
@@ -200,9 +218,13 @@ for %%s in (%SERVICES%) do (
     )
 )
 
-:: ---------------------- 6. Фоновые приложения ----------------------
-echo [6/7] Запрещаю фоновую работу приложений Microsoft Store
-reg add "%REG_BG%" /v LetAppsRunInBackground /t REG_DWORD /d 2 /f >nul 2>&1
+:: ---------------------- 6. Политики: фоновые приложения, виджеты, браузеры ----------------------
+echo [6/7] Запрещаю фоновые приложения Store, виджеты, фоновый режим Edge и Chrome
+for /l %%i in (1,1,%POL_COUNT%) do (
+    for /f "tokens=1-3 delims=;" %%k in ("!POL%%i!") do reg add "%%k" /v "%%l" /t REG_DWORD /d %%m /f >nul 2>&1
+)
+taskkill /f /im Widgets.exe >nul 2>&1
+taskkill /f /im WidgetService.exe >nul 2>&1
 
 :: ---------------------- 7. Защитник Windows ----------------------
 echo [7/7] Защитник Windows: плановые проверки выкл., лимит CPU для проверок 5 проц.
